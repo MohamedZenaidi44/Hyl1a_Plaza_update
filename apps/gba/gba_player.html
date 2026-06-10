@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%; height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    #game {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #controls-hint {
+      position: fixed;
+      top: 50%; left: 16px;
+      transform: translateY(-50%);
+      color: rgba(255,255,255,0.35);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      line-height: 2;
+      pointer-events: none;
+      z-index: 50;
+    }
+    #controls-hint b { color: #7ec4ff; }
+  </style>
+</head>
+<body>
+
+<div id="game">Loading…</div>
+
+<div id="controls-hint">
+  <b>FLÈCHES</b> : DIR<br>
+  <b>X</b> : A &nbsp;&nbsp; <b>Z</b> : B<br>
+  <b>A</b> : L &nbsp;&nbsp; <b>S</b> : R<br>
+  <b>ENTRÉE</b> : START<br>
+  <b>MAJ</b> : SELECT
+</div>
+
+<script>
+// ── Parse URL params ───────────────────────────────────────────────────────
+const hashStr = window.location.hash ? window.location.hash.substring(1) : window.location.search;
+const urlParams = new URLSearchParams(hashStr);
+let romUrl   = urlParams.get('rom');
+let gameName = urlParams.get('name') || 'Unknown Game';
+
+if (!romUrl && window.location.hash.includes('rom=')) {
+  window.location.hash.substring(1).split('&').forEach(p => {
+    if (p.startsWith('rom='))  romUrl   = decodeURIComponent(p.split('=').slice(1).join('='));
+    if (p.startsWith('name=')) gameName = decodeURIComponent(p.split('=').slice(1).join('='));
+  });
+}
+
+const currentUser = localStorage.getItem('nostalgia_current_user') || 'Guest';
+const safeGameName = `${currentUser}_${gameName}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+if (romUrl) {
+  // ── EmulatorJS config — version fixe 4.0.9, pas "latest" ──────────────
+  window.EJS_player        = '#game';
+  window.EJS_core          = 'mgba';
+  window.EJS_gameUrl       = romUrl;
+  window.EJS_gameName      = safeGameName;
+  window.EJS_pathtodata    = 'https://cdn.emulatorjs.org/4.0.9/data/';
+  window.EJS_startOnLoaded = true;
+  window.EJS_threads       = false;
+
+  window.EJS_defaultOptions = {
+    'save-state-location': 'browser',
+    'rewind':              'false',   // désactivé — coûteux en RAM
+    'f-skip':              '0',
+  };
+
+  // Save state hooks pour SaveManager
+  window.EJS_onSaveState = function(data) {
+    // Sync vers parent SaveManager (cloud)
+    if (window.parent?.SaveManager) {
+      window.parent.SaveManager.saveState('gba', gameName, data.state);
+    }
+    // postMessage response si demandé
+    window.parent?.postMessage({ type: 'SAVE_STATE_RESPONSE', state: data.state }, '*');
+  };
+
+  // postMessage API depuis gba.js
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'GET_SAVE_STATE') {
+      if (window.EJS_emulator) {
+        window.EJS_emulator.saveState();
+      }
+    }
+    if (e.data?.type === 'LOAD_SAVE_STATE' && e.data.state) {
+      if (window.EJS_emulator) {
+        window.EJS_emulator.loadState(e.data.state);
+      }
+    }
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    e.preventDefault();
+    e.returnValue = 'Sauvegardez avant de quitter !';
+  });
+
+  const script = document.createElement('script');
+  script.src = 'https://cdn.emulatorjs.org/4.0.9/data/loader.js';
+  document.body.appendChild(script);
+
+  // Focus
+  window.focus();
+  document.addEventListener('mousedown', () => window.focus());
+
+  // Mouse events vers parent
+  window.addEventListener('mousemove', e =>
+    window.parent?.postMessage({ type: 'mii-mousemove', x: e.clientX, y: e.clientY }, '*'));
+  window.addEventListener('mousedown', e =>
+    window.parent?.postMessage({ type: 'mii-mousedown', x: e.clientX, y: e.clientY }, '*'));
+
+} else {
+  document.getElementById('game').innerHTML =
+    '<span style="color:#f88;font-size:18px;">❌ Aucune ROM fournie</span>';
+}
+</script>
+</body>
+</html>
